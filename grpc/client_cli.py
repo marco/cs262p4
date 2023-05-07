@@ -70,6 +70,12 @@ accelerate launch --mixed_precision="fp16" train_dreambooth.py \\
 --num_class_images=200 \\
 --max_train_steps=800"
 
+It may be necessary to perform a conversion:
+python3 ../../scripts/convert_original_stable_diffusion_to_diffusers.py --checkpoint_path=[received ckpt file] --dump_path=[your model path]
+
+After, you may also want to run:
+python3 ../../scripts/convert_diffusers_to_original_stable_diffusion.py --model_path=[your model path] --checkpoint_path=[ckpt out file]
+
 To infer, run
 
 python3 infer.py
@@ -103,9 +109,10 @@ python3 infer.py
     try:
       response = self.client.Get(service_pb2.GetRequest())
       if response.hosted_id:
-        to_save = '/tmp/cs262mj4-' + str(uuid.uuidv4()) + '.ckpt'
-        self.bucket.download_file(self.hosted_model_id, to_save)
-        print('Saved model.')
+        to_save = '/tmp/cs262mj4-' + str(uuid.uuid4()) + '.ckpt'
+        print('Downloading model: ' + response.hosted_id)
+        bucket.download_file(response.hosted_id, to_save)
+        print('Saved model to: ' + to_save)
         self.current_model_path = to_save
       else:
         print('Error: No model available.')
@@ -121,14 +128,14 @@ python3 infer.py
         print('Error: Missing current model.')
         return
 
-      patch_location = '/tmp/cs262mj4-' + str(uuid.uuidv4()) + '.patch'
+      patch_location = '/tmp/cs262mj4-' + str(uuid.uuid4()) + '.patch'
       subprocess.run(['bsdiff4', self.current_model_path, new_model_path, patch_location])
-      new_file_id = str(uuid.uuidv4()) + '.patch'
-      self.bucket.upload_file(patch_location, new_file_id)
+      new_file_id = str(uuid.uuid4()) + '.patch'
+      bucket.upload_file(patch_location, new_file_id)
       response = self.client.Merge(service_pb2.MergeRequest(ckpt_diff_id=new_file_id))
       if response.hosted_id:
-        to_save = '/tmp/cs262mj4-' + str(uuid.uuidv4()) + '.ckpt'
-        self.bucket.download_file(self.hosted_model_id, to_save)
+        to_save = '/tmp/cs262mj4-' + str(uuid.uuid4()) + '.ckpt'
+        bucket.download_file(response.hosted_id, to_save)
         print('Saved model.')
         self.current_model_path = to_save
       else:

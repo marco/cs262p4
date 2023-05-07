@@ -9,6 +9,7 @@ sudo yum -y install bsdiff
 pip install deepspeed
 pip install bsdiff4
 pip install boto3
+pip install omegaconf
 pip uninstall urllib3
 pip install urllib3==1.26.15
 accelerate config

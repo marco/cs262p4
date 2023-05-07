@@ -3,6 +3,7 @@ import time
 import threading
 import re
 import uuid
+import torch
 from concurrent import futures
 import grpc
 import service_pb2
@@ -25,10 +26,10 @@ class ReplicaUpdateData: # utility class to wrap up replica information
 
 # A GRPC Servicer that handles the server's actions.
 class ServerServicer(service_pb2_grpc.MessageServiceServicer):
-  def __init__(self, replica_id=None, leader_id=None, replicas={}, out_file=None):
+  def __init__(self, hosted_model_id, replica_id=None, leader_id=None, replicas={}, out_file=None):
     super().__init__()
 
-    self.hosted_model_id = None
+    self.hosted_model_id = hosted_model_id
 
     self.bucket = boto3.resource('s3').Bucket('cs262mj4')
 
@@ -93,18 +94,14 @@ class ServerServicer(service_pb2_grpc.MessageServiceServicer):
     if not self.raft_manager.is_leader():
       return self.raft_manager.leader_stub().Merge(service_pb2.MergeRequest(ckpt_diff_id=request.ckpt_diff_id))
 
-    if request.hosted_model_id != self.hosted_model_id:
-      return service_pb2.ModelResponse(success=False, hosted_id='')
-
-    to_maintain = '/tmp/cs262mj4-' + str(uuid.uuidv4()) + '.ckpt'
-    to_update = '/tmp/cs262mj4-' + str(uuid.uuidv4()) + '.ckpt'
-    downloaded_patch = '/tmp/cs262mj4-' + str(uuid.uuidv4()) + '.patch'
+    to_maintain = '/tmp/cs262mj4-' + str(uuid.uuid4()) + '.ckpt'
+    to_update = '/tmp/cs262mj4-' + str(uuid.uuid4()) + '.ckpt'
+    downloaded_patch = '/tmp/cs262mj4-' + str(uuid.uuid4()) + '.patch'
     self.bucket.download_file(self.hosted_model_id, to_maintain)
-    shutil.copyfile(to_maintain, to_update)
     self.bucket.download_file(request.ckpt_diff_id, downloaded_patch)
-    subprocess.run(['bspatch4', to_update, downloaded_patch])
+    subprocess.run(['bspatch4', to_maintain, to_update, downloaded_patch])
     new_file = self.merge_local_files(to_update, to_maintain, 0.3)
-    new_file_id = str(uuid.uuidv4()) + '.ckpt'
+    new_file_id = str(uuid.uuid4()) + '.ckpt'
     self.bucket.upload_file(new_file, new_file_id)
     self.hosted_model_id = new_file_id
     return service_pb2.ModelResponse(success=True, hosted_id=self.hosted_model_id)
@@ -119,20 +116,20 @@ class ServerServicer(service_pb2_grpc.MessageServiceServicer):
     for key in theta_a.keys():
       if skip_vae and "first_stage_model" in key:
         continue
-      if "model" in key and key in theta_1:
-        theta_a[key] = (1 - ratio) * theta_a[key] + alpha * theta_b[key]
+      if "model" in key and key in theta_b:
+        theta_a[key] = (1 - ratio) * theta_a[key] + ratio * theta_b[key]
     for key in theta_b.keys():
       if "model" in key and key not in theta_a:
         theta_a[key] = theta_b[key]
 
-    out_file = '/tmp/cs262mj4-' + str(uuid.uuidv4()) + '.ckpt'
+    out_file = '/tmp/cs262mj4-' + str(uuid.uuid4()) + '.ckpt'
     torch.save({"state_dict": theta_a}, out_file)
     return out_file
 
 # A server that can start the GRPC servicer on a given port.
 class Server():
-  def __init__(self, replica_id=None, leader_id=None, replicas={}, out_file=None):
-    self.servicer = ServerServicer(replica_id=replica_id, leader_id=leader_id, replicas=replicas, out_file=out_file)
+  def __init__(self, hosted_model_id, replica_id=None, leader_id=None, replicas={}, out_file=None):
+    self.servicer = ServerServicer(hosted_model_id, replica_id=replica_id, leader_id=leader_id, replicas=replicas, out_file=out_file)
 
   def start(self, port):
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
