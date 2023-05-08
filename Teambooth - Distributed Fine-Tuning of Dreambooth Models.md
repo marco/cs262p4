@@ -4,7 +4,9 @@ by Jeffrey Wang and Marco Burstein.
 
 ## Opening Notes
 
-This document is written in Markdown. Our past engineering notebooks were written in Markdown, so our notebook for this project began in that format too; we then thought it would be cleaner to keep the engineering notebook / technical writing along with the main report, hence why this format has persisted. We have still structured this as a full report, with figures, tables, and a bibliography. After that, a `README`-style document is available with more technical details (installation, user manual, testing, etc.).
+This document is written in Markdown. Our past engineering notebooks were written in Markdown, so our notebook for this project began in that format too; we then thought it would be cleaner to keep the engineering notebook / technical writing along with the main report, hence why this format has persisted. We have still structured this as a full report, with figures, tables, and a bibliography. The report is 6-10 pages. 
+
+After that, a `README`-style document is available with more technical details (installation, user manual, testing, etc.).
 
 *Links*:
 - [GitHub Repo](https://github.com/marco/cs262p4/ )
@@ -28,7 +30,6 @@ As a result, a federated learning approach can make Dreambooth (and other comput
 - Describe engineering challenges and compromises that have gone into our application
 - Illustrate the user experience for generators and fine-tuners
 - Summarize the compellingly unit economics of this changed model
-- Discuss the ethics of "distributing" such a powerful model
 
 After the "report" section, we have an engineering notebook that describes installation, user interactions, and more.
 
@@ -36,12 +37,12 @@ After the "report" section, we have an engineering notebook that describes insta
 
 For the sake of brevity, we omit a full description of Dreambooth's mathematical workings here. Readers intersted in the mathematical derivation may consider the original papers for Dreambooth and Stable Diffusion [1, 2]. Our focus in this report will be describing our engineering decisions, challenges, and tests. In this section, we'll introduce vocabulary and context that's relevant throughout our report.
 
-First, we should note that we did not implement Dreambooth from scratch. Startups have raised billions of dollars [4, 5, 6] doing so; for our purposes, we used open-source libraries [CITE] built on PyTorch to instantiate the model itself. There were significant challenges in doing so, which we describe later; here, we will treat the Dreambooth model as a black box, with three key operations:
-- FINE-TUNE (TRAIN): A client fine-tunes the global model with custom images.
-- MERGE: The server merges a client fine-tuned model with the global model.
+First, we should note that we did not implement Dreambooth from scratch. Startups have raised billions of dollars [4, 5, 6] doing so; for our purposes, we used open-source libraries [7, 8] built on PyTorch to instantiate the model itself. Here, we will treat the Dreambooth model as a black box, with three key operations:
+- FINE-TUNE (aka TRAIN): A client fine-tunes the global model with custom images.
+- MERGE: The server merges a client fine-tuned model with the global model. 
 - INFER: A client runs inference for a given model.
 
-In our implementation, the clients perform all of the real computation (fine-tuning and generation). The only thing the server does is merge client models, and serve "GET" requests from clients who wish to fine-tune or run inference on the existing global model (the clients then perform the computation). More details on these design decisions are available later.
+In our implementation, the clients perform all of the real computation (fine-tuning and generation). The only thing the server does is merge client models, and serve "GET" requests from clients who wish to fine-tune or run inference on the existing global model (the clients then perform the computation themselves). More details on these design decisions are available later.
 
 Finally, throughout this report, we refer to three different "user types" of our code:
 - Server: The backend running the application.
@@ -53,10 +54,15 @@ Finally, throughout this report, we refer to three different "user types" of our
 At initial glance, it isn't clear that "federated" is necessarily "better" here: while the federated learning approach does "distribute" the computation, the architecture remains one that is client-server. Indeed, with one central server and many clients, many of the challenges of creating a distributed architecture can be avoided.
 
 However, such an approach does not scale well with many users, since every user-tuned model needs to be "merged" back into the global one. During these merges, other clients cannot be serviced. Consider, for instance, the following user scenario:
+
 (A) There is an initial server only fine-tuned on images of Waldo.
+
 (B) Next, a client fine-tuner requests the model, receives it, and begins fine-tuning on her golden retriever.
+
 (C) While that occurs, a client requestor can still request generation of e.g. "Waldo on the beach."
+
 (D) When the first fine-tuner finishes, the central server takes a while to merge.
+
 (E) During that time, using a single server, another client requestor must wait until merging is finished until requesting generation of Waldo again.
 
 ![](fig2.png)
@@ -66,7 +72,7 @@ In our testing, merges usually take ~2-5 minutes. In a single server, this is do
 
 Hypothetically, these problems could be ameliorated with one central server running an asynchronous event loop. However, doing so would place all of the servicing burden on one machine and is not fault-tolerant whatsoever. Additionally, this approach is not extensible at all—it does not, for instance, allow for more than one machine at a time doing merges. As a result, we opted for a distributed paradigm with one machine performing MERGEs, and the other machines serving FINE-TUNE and INFER requests (essentially GET) requests.
 
-This ensures that our application has essentially 100% uptime; the distributed paradigm here therefore makes our application more fault-tolerant, more reliable, and more extensible. (While MERGEs may still have a queue here, a natural extension is making more than one machine MERGE at a time.)
+This ensures that our application has essentially 100% uptime. The distributed paradigm here therefore makes our application more fault-tolerant, more reliable, and more extensible. (While MERGEs may still have a queue here, a natural extension is making more than one machine MERGE at a time.)
 
 **Engineering Overview**
 
@@ -88,7 +94,7 @@ As noted in the beginning, in our implementation, the PR handles all MERGEs and 
 **Use Cases and Benefits: Who Wins?**
 
 Given the above implementation, the final use scenario with the servers up would look as follow:
-- Different users that want to FINE-TUNE request the global model and train on specific subjects.
+- Different users that want to FINE-TUNE can request the global model and train on specific subjects.
 - As fine-tuning finishes for users at different times (because of compute capabilities), they send the model back to the primary server, which runs MERGE on those models into the global model.
 	- Any time the PR finishes a merge, it propagates that new model ID to secondary replicas.
 - Any time a client wishes to INFER, they send a request to an SR, which serves the most recent model ID.
@@ -104,7 +110,7 @@ In practice, we found that the differentiation did not always work perfectly. Fo
 ![](fig3.png)
 *Figure 3: Concept Drift. Fine-tuning on multiple people can lead to confused representations.*
 
-We hypothesize that this occured because the 3-letter embeddings, even when random, were still not specific enough to distinguish the subjects. For our current test application, there is not workaround to this, although as a future extension we could ask users for the subject they are uploading and not allow future users to upload that subject. One vulnerability of this solution is that it is easily susceptible to "poisoning" attacks, where a user lies about the subject they upload to prevent other users from full application functionality.
+We hypothesize that this occured because the 3-letter embeddings, even when random, were still not specific enough to distinguish the subjects. For our current application, there is not workaround to this, although as a future extension we could ask users for the subject they are uploading and not allow future users to upload that subject. One vulnerability of this solution is that it is easily susceptible to "poisoning" attacks, where a user lies about the subject they upload to prevent other users from full application functionality.
 
 *Vanishing.* Naturally, as different subjects get merged into the model, it becomes harder to generate good images of those that were fine-tuned in the distant past. Because fine-tuning on a single takes hours of compute (see "unit economics" section), we were unable to fully test the empirical effects of "vanishing" subjects. However, one workaround to the vanishing effect is making the global model somewhat ephemeral (e.g. reset the model and the servers' list of subjects to base every 24 hours).
 
@@ -131,15 +137,18 @@ In our testing, we ran merges with the smallest instance, a `g3s.xlarge`, where 
 
 One alternative to merging into a global model, given the "concept drift" and "vanishing" effects, is to simply store all client models. One issue with this paradigm is that each fine-tuned model is ~3GB in size, which scales quickly with users. However, from a compute perspective, it is even more efficient than our model (which needs merges) and similarly cost-effective at a small scale given how cheap storage is.
 
-**Conclusion and Future Extensions**
+**Future Extensions**
 
-In production, there are a number of improvements we'd consider, including adding a reverse proxy so that clients don't need to specify PR/SR addresses, and parallelizing MERGEs across more machines (this could result in sharding the model across multiple devices, which might help address "vanishing" issues).
+With our current work, we hope that we demonstrate a viable way to train Dreambooth in a distributed way. In production, there are a number of improvements we'd consider, including adding a reverse proxy so that clients don't need to specify PR/SR addresses, and parallelizing MERGEs across more machines (this could result in sharding the model across multiple devices, which might help address "vanishing" issues).
 
 Other potential improvements for the future include:
 
 - **Easier conversion between `.ckpt` and diffusers representation**. Currently, an additional command is required to convert from the diffusers directory-based model representation and the `.ckpt` format used for zipping and merging models. In the future, automating this process would make generating and using models easier.
 - **Class image support**. Dreambooth generally performs better when generic "class images" are provided for comparison against the specific instance images.
-- **More advanced merging strategy**. Although a linear-combination-based merging strategy works relatively well, it would be interesting to investigate more complex strategies for combining models.
+- **Bundling everything into a GUI**: right now, everything is run from the CLI. We wrote a simple web app to upload images (rather than e.g. scp'ing them onto your AWS instance), but since the CLI needs to be used anyway (in order to specify server IP's), it is not fully functional. We imagine another lap of development, which would add a reverse proxy server-side, would remove the client CLI and make all user interactions through the GUI. 
+
+![](fig4.png)
+*Figure 4: The cosmetic GUI. Users can upload photos for fine-tuning, or request a specific subject from the model.*
 
 ## References
 
@@ -155,14 +164,12 @@ Other potential improvements for the future include:
 
 [6] Generating ‘smarter’ biotechnology. _Nat Biotechnol_ **41**, 157 (2023). https://doi.org/10.1038/s41587-023-01695-x
 
-[4] Van Le, Thanh, et al. "Anti-DreamBooth: Protecting users from personalized text-to-image synthesis." _arXiv preprint arXiv:2303.15433_ (2023).
+[7] von Platen, P., Patil, S., Lozhkov, A., Cuenca, P., Lambert, N., Rasul, K., Davaadorj, M., & Wolf, T. Diffusers: State-of-the-art diffusion models (Version 0.12.1) [Computer software]. https://github.com/huggingface/diffusers
 
-[5] Salmon, Felix. “A New Generation of AIS Have Learned to Copy Art Made by Humans.” _Axios_, 5 Nov. 2022, https://www.axios.com/2022/11/05/artificial-intelligence-ai-art-author-ownership-rights.
-
-[6] Berwick, Isabel, and Sophia Smith. “Will AI Replace Human Workers?” _Financial Times_, Financial Times, 14 Dec. 2022, https://www.ft.com/content/24f07261-f95d-4bb3-8aa4-3799f1f75e52.
+[8] Shirirao, S. Diffusers: Diffusers: State-of-the-art diffusion models (Dreambooth Fork). https://github.com/ShivamShrirao/diffusers
 
 
-## Technical/User Details
+# Part 2: Technical/User Details (i,e. a README)
 
 Information on installation, testing, and style are below.
 
@@ -181,8 +188,6 @@ Different users will need different packages. We offer detailed instructions for
 	- Jinja2
 	- safetensors
 	- xformers
-- node (client requestor - optional)
-- flask (client requestor - optional)
 
 Note that the server has similar dependencies as a client generator, with gRPC to do inter-server communication. Note also that in a real deployment, the "client requestor" would likely use some pre-served web application. For this project, we opted to make that simply a locally-run GUI using a simple React app; it can also be run through the command line as well.
 
@@ -216,12 +221,11 @@ Similarly, to run the client, use:
 python3 main.sh --servers [address:port,address:port,...]
 ```
 
-You can then use option `0` to download the latest model and `2` to see detailed instructions about training an update to the model. Note that this training process is largely the client's own responsibility, and the client can adjust the options passed accordingly. Then, a conversion script must be useed to regenerate a `.ckpt` file, and option `1` can be used to merge this with the current model.
+You can then use option `0` to download the latest model and `2` to see detailed instructions about training an update to the model. Note that this training process is largely the client's own responsibility, and the client can adjust the options passed accordingly. Then, a conversion script must be used to regenerate a `.ckpt` file, and option `1` can be used to merge this with the current model.
 
+**Client GUI**
 
-**Client Requestor (GUI)**
-
-To run the GUI for uploading images, you can run:
+Because some CLI interaction is needed to run the app (you have to specify port:address locations), the GUI is largely cosmetic at the moment. It can still be booted up with: 
 
 ```
 # In `server`
@@ -233,12 +237,7 @@ pip3 install -r requirements.txt
 npm install
 ```
 
-## Using The App
-
-For each run type, do the following:
-
-**Client Generator**
-
+Then, run: 
 ```
 # Inside `web`:
 npm start
@@ -247,11 +246,9 @@ npm start
 npm run start-api
 ```
 
-Then, upload a picture to the portal and watch magic happen!
+### Testing/Resilience
 
-#### Testing/Resilience
-
-On the server side, we tested Raft across a dynamic set of environments, which we believe encompass much of the "hair" of the implementation:
+Because image generation is pretty hard to "test" (e.g. takes hours), we didn't include unit tests for those functions. On the server side, we tested Raft across a dynamic set of environments, which we believe encompass much of the "hair" of the implementation:
 
 | Tests | 3M:NM1 | 3M:NM2 | 3M:CR1 | 3M:CR2 | 5M:CR2 | 5M:CR4 |
 | :--- | :----: | :---: | :----: | :----: | :----: | :---: |
@@ -266,6 +263,6 @@ which correspond to:
 - 5M:CR2 - 5 Machines where two machines crash (cmd+c).
 - 5M:CR4 - 5 Machines where four machines crash (cmd+c).
 
-#### Style
+### Style
 
 Our code adheres to the PEP-8 style guide in Python.
