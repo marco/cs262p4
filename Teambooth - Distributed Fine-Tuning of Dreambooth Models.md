@@ -116,7 +116,7 @@ We hypothesize that this occured because the 3-letter embeddings, even when rand
 
 **Experiments, Tests, and Unit Economics of Teambooth**
 
-Testing this application was difficult because of the intense compute. We built unit tests and tested the fault-tolerance of our application. See `Testing/Resilience` in the second part of our report for more on that. As such, most of our experiments for this report were on proof-of-viability, as we tested the feasability and appeal of this approach from a unit economics perspective.
+Testing this application was difficult because of the intense compute. We had GRPC unit tests and tested the fault-tolerance of our application. See `Testing/Resilience` in the second part of our report for more on that. As such, most of our experiments for this report were on proof-of-viability, as we tested the feasability and appeal of this approach from a unit economics perspective.
 
 Using `g3.xlarge` [instances](https://aws.amazon.com/ec2/instance-types/g3/), which are NVIDIA Tesla M60 GPUs with 2048 parallel processing cores and 8-32 GiB of GPU memory, fine-tuning to good quality takes on the order of 10 minutes to 2 hours, depending on hyperparameter configurations and machine type (we used 800 fine-tuning iterations). Generation of an image, on the other hand, takes 5-60 seconds: anywhere from 1-3 orders of magnitude less. As such, given that these machines run from $0.75/hr to $4.56/hr, a single generation costs about $1-2 on average for the client. See table below:
 
