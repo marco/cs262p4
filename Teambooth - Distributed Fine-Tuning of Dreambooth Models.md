@@ -248,7 +248,7 @@ npm run start-api
 
 ### Testing/Resilience
 
-Because image generation is pretty hard to "test" (e.g. takes hours), we didn't include unit tests for those functions. On the server side, we tested Raft across a dynamic set of environments, which we believe encompass much of the "hair" of the implementation:
+We had unit tests from previous problem sets for our GRPC messaging service. Because image generation is pretty hard to "test" (e.g. takes hours), we didn't include unit tests for the quality of the image generations. On the server side, we tested Raft across a dynamic set of environments, which we believe encompass much of the "hair" of the implementation:
 
 | Tests | 3M:NM1 | 3M:NM2 | 3M:CR1 | 3M:CR2 | 5M:CR2 | 5M:CR4 |
 | :--- | :----: | :---: | :----: | :----: | :----: | :---: |
